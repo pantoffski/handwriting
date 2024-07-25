@@ -1,0 +1,244 @@
+<html>
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reset-css@5.0.2/reset.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/vue@3.4.27/dist/vue.global.min.js"></script>
+  <script type="text/javascript" src="handwriting.canvas.js"></script>
+
+  <style>
+    #app {
+      --td-size: 40px;
+      font-family: monospace;
+      width: 100vw;
+      height: 100svh;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .tbl {
+      position: relative;
+    }
+
+    .tbl td {
+
+      text-align: center;
+      font-size: calc(var(--td-size) * 0.4);
+      width: var(--td-size);
+      height: var(--td-size);
+      pointer-events: none;
+      user-select: none;
+      position: relative;
+    }
+
+    .tbl td.t {
+      border-top: 1px solid black;
+    }
+
+    .tbl td.inp {
+      color: blueviolet;
+    }
+
+    .tbl td.needans span {
+      border: 1px solid salmon;
+      color: transparent;
+    }
+
+    .tbl td.r {
+      border-right: 1px solid black;
+    }
+
+    .tbl td.b {
+      border-bottom: 1px solid black;
+    }
+
+    .tbl td.bb {
+      border-bottom: 1px solid black;
+    }
+
+    .tbl td span {
+      display: block;
+      width: 100%;
+      line-height: var(--td-size);
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app">
+    <div id="tbl" :style="{'--td-size':this.tdSize+'px'}">
+      <table class='tbl' cellspacing=0 cellpadding=0>
+        <tr v-for="(tr,index) in tbl" :key="index">
+          <td v-for="(td,index2) in tr" :class="td.cls" :key="index2"><span :id="`cell_${index}_${index2}`">{{td.v ??
+              ''}}</span></td>
+        </tr>
+      </table>
+      <canvas id="canvas" :width="scrW" :height="scrH"
+        style="border: 0px solid; cursor: crosshair;position: absolute;top:0;left:0;"></canvas>
+    </div>
+
+    <audio ref="correct" src="./correct.mp3" />
+    <audio ref="correct2" src="./correct2.mp3" />
+    <audio ref="wrong" src="./wrong.mp3" />
+  </div>
+  <script type="text/javascript" defer>
+
+    Vue.createApp({
+      data() {
+        return {
+          canvas: null, padding: 15, tbl: [[]], scrW: 100, scrH: 100, t: null, waitMS:500
+        }
+      }, methods: {
+        randInt(min, max) {
+          min = Math.ceil(min);
+          max = Math.floor(max);
+          return Math.floor(Math.random() * (max - min + 1)) + min;
+        },
+        genTbl() {
+          var a = this.randInt(1000, 9999), b = this.randInt(2, 12);
+          var ret = [],
+            quotient = 0,
+            padd = `${b}`.length,
+            arr = `${a}`.split('').map(v => v * 1),
+            tblWidth = arr.length + padd, i = 0, rem = 0;
+          var tmp, v, d, vrr, firstRow = true;
+          tmp = `${b}${a}`.split('').map(v => v * 1);
+          ret.push(tmp.map((v, idx) => {
+            return { v, x: 0, y: 0, cls: { t: idx >= padd, r: idx == padd - 1 } }
+          }));
+          while (i < tblWidth - padd) {
+            rem = rem * 10 + arr[i];
+            quotient = quotient * 10;
+            if (rem < b) {
+              i++;
+              continue;
+            }
+            v = rem;
+            tmp = new Array(tblWidth).fill(null);
+            vrr = `${v}`.split('').map(v => v * 1);
+            tmp.splice(padd + i - vrr.length + 1, vrr.length, ...vrr);
+            if (!firstRow)
+              ret.push(tmp.map((_v, idx) => {
+                var v = _v;
+                if (v === null && idx >= padd && ret[ret.length - 1][idx].v !== null) v = 0;
+                return { v, x: 0, y: 0, cls: { inp: v !== null ? true : false, needans: v !== null ? true : false, r: idx == padd - 1 } }
+              }));
+            firstRow = false;
+            d = Math.floor(rem / b);
+            quotient += d;
+            v = d * b;
+            tmp = new Array(tblWidth).fill(null);
+            vrr = `${v}`.split('').map(v => v * 1);
+            tmp.splice(padd + i - vrr.length + 1, vrr.length, ...vrr);
+            ret.push(tmp.map((v, idx) => {
+              // var v=_v;
+              return { v, x: 0, y: 0, cls: { inp: v !== null ? true : false, needans: v !== null ? true : false, b: v !== null, r: idx == padd - 1 } }
+            }));
+            rem = rem % b;
+            i++;
+          }
+          v = rem;
+          tmp = new Array(tblWidth).fill(null);
+          vrr = `${v}`.split('').map(v => v * 1);
+          tmp.splice(padd + i - vrr.length, vrr.length, ...vrr);
+          ret.push(tmp.map((v, idx) => {
+            return { v, x: 0, y: 0, cls: { inp: v !== null ? true : false, needans: v !== null ? true : false, bb: idx > padd && v !== null, r: idx == padd - 1 } }
+          }));
+          v = quotient;
+          tmp = new Array(tblWidth).fill(null);
+          vrr = `${v}`.split('').map(v => v * 1);
+          tmp.splice(padd + i - vrr.length, vrr.length, ...vrr);
+          ret = [(tmp.map((v, idx) => {
+            return { v, x: 0, y: 0, cls: { inp: v !== null ? true : false, needans: v !== null ? true : false } }
+          })), ...ret];
+          this.tbl = ret;
+          this.$nextTick(_ => {
+            for (var i = 0; i < this.tbl.length; i++)
+              for (var j = 0; j < this.tbl[i].length; j++) {
+                if (this.tbl[i][j].v === null) continue;
+                var { x, y, width, height } = document.querySelector(`#cell_${i}_${j}`).getBoundingClientRect();
+                this.tbl[i][j].x = x + width / 2;
+                this.tbl[i][j].y = y + height / 2;
+              }
+          })
+        },
+        init() {
+          var canvas = new handwriting.Canvas(document.getElementById('canvas'), 1);
+          canvas.setCallBack(this.detect);
+          canvas.set_Undo_Redo(false, false);
+          canvas.setStrokeCallBack(this.strokeEvt);
+          canvas.setOptions({ language: 'en' });
+          this.canvas = canvas;
+        },
+        doDetect() {
+          try {
+            clearInterval(this.t);
+          } catch (e) { }
+          console.log('do detect');
+           this.canvas.recognize();
+        },
+        detect(data, err) {
+          console.log('detect');
+
+          if (err) console.error(err);
+          else {
+            var ct = this.canvas.getCenter();
+            this.canvas.erase();
+            var digit = data.reduce((t, v) => {
+              if (!isNaN(v) && t === null) return v * 1;
+              return t;
+            }, null)
+            if (digit === null) return;
+            var needAnsCount = 0, marked = false;
+            for (var i = 0; i < this.tbl.length; i++)
+              for (var j = 0; j < this.tbl[i].length; j++) {
+                var x = this.tbl[i][j].x, y = this.tbl[i][j].y, dist = Math.sqrt((ct.x - x) * (ct.x - x) + (ct.y - y) * (ct.y - y));
+                if (this.tbl[i][j].cls.needans) {
+                  needAnsCount++;
+                  if (!marked && this.tbl[i][j].v == digit && dist < this.tdSize) {
+                    this.tbl[i][j].cls.needans = false;
+                    marked = true;
+
+                    this.$refs.correct.play();
+                  }
+                }
+              }
+            if (!marked)
+              this.$refs.wrong.play();
+            if (needAnsCount == 1) {
+              this.$refs.correct2.play(); this.genTbl();
+            }
+          }
+        },
+        strokeEvt(v) {
+          try {
+            clearInterval(this.t);
+          } catch (e) {
+            console.warn(e);            
+           }
+          if (v != 'end') return;
+          console.log('strokee', v);
+          console.log('setTimeout');
+
+          this.t = setInterval(this.doDetect,this.waitMS);
+        }
+      }, computed: {
+        tdSize() {
+          return Math.min((this.scrW - this.padding * 2) / (this.tbl[0].length), (this.scrH - this.padding * 2) / this.tbl.length);
+        },
+      }, async mounted() {
+        this.$nextTick(_ => {
+          var { width: w, height: h } = document.querySelector('#app').getBoundingClientRect();
+          this.scrW = w; this.scrH = h;
+          this.$nextTick(_ => {
+            this.genTbl();
+            this.init();
+          });
+        });
+      }
+    }).mount("#app");
+  </script>
+</body>
+
+</html>
